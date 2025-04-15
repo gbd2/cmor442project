@@ -3,19 +3,19 @@ from gurobipy import Model, GRB
 
 class AirlineOptimizer:
     def __init__(self, cost_matrix, aircraft_to_hours, capacity_matrix, max_flight_hours, demand_prob_tuple):
-        self.cost_matrix = cost_matrix
-        self.aircraft_to_hours = aircraft_to_hours
-        self.capacity_matrix = capacity_matrix
-        self.max_flight_hours = max_flight_hours
-        self.demand_prob_tuple = demand_prob_tuple
-        self.num_aircraft, self.num_routes = aircraft_to_hours.shape
+        self.cost_matrix = cost_matrix # c_{ij}
+        self.aircraft_to_hours = aircraft_to_hours # a_{ij}
+        self.capacity_matrix = capacity_matrix # b_{ij}
+        self.max_flight_hours = max_flight_hours # F_i
+        self.demand_prob_tuple = demand_prob_tuple # (d_j, p(d_{j} = X)) (random variable representing demand for route j)
+        self.num_aircraft, self.num_routes = aircraft_to_hours.shape # (I, J)
 
 
-    # ========= Master Problem ============= #
-    def GenerateConstraints(self):
+    # ========= Original Integer Program ============= #
+    def Solve_ZI(self):
         I = self.num_aircraft
         J = self.num_routes
-        model = Model("Stochastic-Airlies")
+        model = Model("Stochastic-Airlies-ZI")
 
 
         # ======== First Stage ============ #
@@ -33,10 +33,10 @@ class AirlineOptimizer:
         b1 = self.max_flight_hours
 
         # A1 matrix: [A | I]
-        for i in range(I):
-            A_row = np.zeros(i)
-            A_row.concatenate([A_row, np.zeros(I-i)])
-            A_row = aircraft_to_hours[i]
+        A_Left = np.empty()
+        for i in range(I*J):
+            A_left = np.concatenate((np.zeros(i), self.aircraft_to_hours[i]), np.zeros(I*J - J) axis=None)
+            A_right = np.identity(I*I)
 
 
 
