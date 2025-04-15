@@ -11,12 +11,10 @@ class AirlineOptimizer:
         self.num_aircraft, self.num_routes = aircraft_to_hours.shape
 
 
-
+    # ========= Master Problem ============= #
     def GenerateConstraints(self):
         I = self.num_aircraft
         J = self.num_routes
-
-
         model = Model("Stochastic-Airlies")
 
 
