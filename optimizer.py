@@ -12,7 +12,7 @@ class AirlineOptimizer:
 
 
     # ========= Original Integer Program ============= #
-    def Solve_ZI(self):
+    def Solve_LI_Assignment_Scheduling(self):
         I = self.num_aircraft
         J = self.num_routes
         model = Model("Stochastic-Airlies-ZI")
@@ -33,27 +33,22 @@ class AirlineOptimizer:
         b1 = self.max_flight_hours
 
         # A1 matrix: [A | I]
-        A_Left = np.empty()
+        A_rows = []
         for i in range(I*J):
-            A_left = np.concatenate((np.zeros(i), self.aircraft_to_hours[i]), np.zeros(I*J - J) axis=None)
-            A_right = np.identity(I*I)
-
-
+            A_row = np.concatenate((np.zeros(i), self.aircraft_to_hours[i]), np.zeros(I*J - J) axis=None)
+            A_rows.append(A_left)
+        
+        A_left = np.array(A_rows)
+        A_right = np.identity(I*I)
+        
+        aircraft_to_hours_mat_s1 = np.hstack(A_left, A_right)
 
         # ======== Second Stage ============ #
-        # Binary variables x_{ijk}, where k ∈ {1, 2, ..., J} \ {J}
-        x2 = model.addVars(I, J, J-1, vtype=GRB.BINARY, name="x2")
 
-        # Slack variables s_{ij} (assumed continuous and non-negative)
-        s = model.addVars(I, J, vtype=GRB.CONTINUOUS, lb=0.0, name="s")
-
-        # Positive and negative deviation variables y^+_j and y^-_j
-        y_plus = model.addVars(J, vtype=GRB.CONTINUOUS, lb=0.0, name="y_plus")
-        y_minus = model.addVars(J, vtype=GRB.CONTINUOUS, lb=0.0, name="y_minus")
-
-        # Now concatenate into a single list in the order from the image
-        # x_ijk with k=1 is skipped (assumed from context: starts from x_{i1,2} onward)
-        x2_vars = []
+        x2 = model.addVars(I, J, J - 1, vtype=GRB.BINARY, name="x2")
+        s2 = model.addVars(I, J, vtype=GRB.CONTINUOUS, lb=0.0, name="s2")
+        y2_plus = model.addVars(J, vtype=GRB.CONTINUOUS, lb=0.0, name="y2_plus")
+        y2_minus = model.addVars(J, vtype=GRB.CONTINUOUS, lb=0.0, name="y2_minus")
 
         # Add x_{ijk} for k=2 only, across i and j (x_{ij2})
         for i in range(I):
