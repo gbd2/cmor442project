@@ -1,5 +1,15 @@
 TIME          AIRL
 PERIODS
-    X11       HOURS1                   PERIOD1
-    X112      AVAIL11                  PERIOD2
+    X11       HOURS1       PERIOD1
+    X12       HOURS1       PERIOD1
+    X21       HOURS2       PERIOD1
+    X22       HOURS2       PERIOD1
+    X112      AVAIL11      PERIOD2
+    X121      AVAIL12      PERIOD2
+    X212      AVAIL21      PERIOD2
+    X221      AVAIL22      PERIOD2
+    YPLUS1    DEMAND1      PERIOD2
+    YPLUS2    DEMAND2      PERIOD2
+    YMINUS1   DEMAND1      PERIOD2
+    YMINUS2   DEMAND2      PERIOD2
 ENDATA
