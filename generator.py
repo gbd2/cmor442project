@@ -213,7 +213,7 @@ def write_smps(I, J, S, indep=False, folder=".", base_name="airlift_large", seed
     var_names = x1_names + x2_names
     row_names = row_names_1
     
-    row_types = ['L'] * len(row_names_1) + ['L'] * (I * J) + ['E'] * J
+    row_types = ['L'] * m1 + ['L'] * (I * J) + ['E'] * J
     row_index = {name: i for i, name in enumerate(row_names)}
     c_full = np.concatenate([c1, c2])  # Cost vector must match var_names order
 
