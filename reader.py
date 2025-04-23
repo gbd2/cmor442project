@@ -125,11 +125,28 @@ def parse_tim(tim_file_path):
         elif period.upper() == "PERIOD2":
             variable_stage[var] = 2
         else:
-            raise ValueError(f"Unknown period: {period}")
+            print(f"Warning: Unknown period {period} for variable {var}. Skipping.")
 
     return variable_stage
 
 def split_stages(A, b, c, var_names, variable_stage):
+    """
+    Split the problem into first and second stages based on variable stages.
+    
+    Parameters:
+        A: Coefficient matrix
+        b: Right-hand side vector
+        c: Objective coefficients vector
+        var_names: List of variable names
+        variable_stage: Dictionary mapping variable names to their stage (1 or 2)
+    Returns:
+        A1, A2: Coefficient matrices for first and second stages
+        c1, c2: Objective coefficients for first and second stages
+        b: Right-hand side vector (same for both stages)
+        first_stage_vars, second_stage_vars: Lists of variable names for each stage
+        first_stage_indices, second_stage_indices: Indices of variables in the original matrix
+    """
+    
     first_stage_vars = [v for v in var_names if variable_stage.get(v, 2) == 1]
     second_stage_vars = [v for v in var_names if variable_stage.get(v, 2) == 2]
 
@@ -188,7 +205,7 @@ def parse_sto_dep(sto_file_path, row_names, default_rhs):
                         idx = row_names.index(row)
                         current_rhs[idx] = val
                     else:
-                        raise ValueError(f"Unknown row name {row} in .sto file")
+                        print(f"Warning: Row {row} not found in row_names. Skipping.")
 
     # Final scenario
     if prob is not None:
@@ -232,50 +249,3 @@ def parse_sto_indep(sto_file_path, row_names, default_rhs):
         scenarios.append((total_prob, b_s.copy()))
 
     return scenarios
-
-def build_extensive_form(A1, A2, b, c1, c2, sto_scenarios, row_sense):
-    m, n1 = A1.shape
-    _, n2 = A2.shape
-    K = len(sto_scenarios)
-
-    total_vars = n1 + K * n2
-    total_rows = K * m
-
-    # Big A matrix: each block is [A1 | 0 ... A2 ... 0]
-    A_ext = np.zeros((total_rows, total_vars))
-    b_ext = np.zeros(total_rows)
-    c_ext = np.zeros(total_vars)
-    row_sense_ext = []
-
-    # First-stage cost
-    c_ext[:n1] = c1
-
-    for k, (prob, b_k) in enumerate(sto_scenarios):
-        row_start = k * m
-        row_end = (k + 1) * m
-
-        # Place A1 block
-        A_ext[row_start:row_end, :n1] = A1
-        # Place A2 block in scenario's y^k slot
-        col_start = n1 + k * n2
-        col_end = col_start + n2
-        A_ext[row_start:row_end, col_start:col_end] = A2
-
-        # RHS
-        b_ext[row_start:row_end] = b_k
-
-        # Scenario-weighted second-stage cost
-        c_ext[col_start:col_end] = prob * c2
-
-        # Extend row senses
-        row_sense_ext.extend(row_sense)
-
-    return {
-        'A_ext': A_ext,
-        'b_ext': b_ext,
-        'c_ext': c_ext,
-        'row_sense': row_sense_ext,
-        'n1': n1,
-        'n2': n2,
-        'K': K
-    }

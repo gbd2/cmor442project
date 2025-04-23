@@ -1,8 +1,6 @@
 import numpy as np
 import gurobipy as gp
 from gurobipy import GRB
-from reader import parse_cor, parse_tim, parse_sto_dep, parse_sto_indep, split_stages, build_extensive_form
-from itertools import product
 
 def solve_subproblem(x_val, A1, A2, b_s, c2, row_sense):
     m, n2 = A2.shape
@@ -16,6 +14,7 @@ def solve_subproblem(x_val, A1, A2, b_s, c2, row_sense):
     rhs_resid = b_s - A1 @ x_val
 
     # Constraints: A2 y <= rhs_resid
+
     constraints = []
     for i in range(m):
         expr = gp.LinExpr()
@@ -58,11 +57,33 @@ def solve_subproblem(x_val, A1, A2, b_s, c2, row_sense):
     else:
         raise RuntimeError(f"Unexpected subproblem status: {y_model.status}")
 
-def benders_slim(A1, A2, b_scenarios, c1, c2, row_sense, tol=1e-6, max_iters=1000):
+def benders_slim(A1, A2, b_scenarios, c1, c2, row_sense, tol=1e-6, max_iters=50):
+    """
+    Solve the Benders decomposition problem using the slim Benders approach.
+    
+    Arguments: 
+        A1: Coefficient matrix for first-stage variables (dense)
+        A2: Coefficient matrix for second-stage variables (dense)
+        b_scenarios: List of tuples (probability, b^k) for each scenario
+        c1: Coefficients for first-stage objective function
+        c2: Coefficients for second-stage objective function
+        row_sense: List of constraint senses ('L', 'E', 'G')
+        tol: Tolerance for convergence
+        max_iters: Maximum number of iterations
+    Returns:
+        Mapping with optimal values of x and theta, objective value, number of iterations,
+        and the number of cpnstraints added to the master problem.
+    """
+    
+    # Reset Gurobi model
+    # gp.Model.reset()
+    
     m, n1 = A1.shape
     _, n2 = A2.shape
     K = len(b_scenarios)
 
+    print(f"Building Benders decomposition model with {m} constraints and {n1} first-stage variables.")
+    
     # Step 1: Initialize master model
     master = gp.Model("SlimBendersMaster")
     master.setParam("OutputFlag", 0)
@@ -98,9 +119,11 @@ def benders_slim(A1, A2, b_scenarios, c1, c2, row_sense, tol=1e-6, max_iters=100
     iteration = 0
     UB = 1e10     # large but finite
     LB = -1e10    # small but finite
+    
+    print("Starting Benders decomposition loop")
     while iteration < max_iters and abs((UB - LB) / (abs(UB) + 1e6)) > tol:
         iteration += 1
-        if iteration % 50 == 0:
+        if iteration % 10 == 0:
             print(f"Iteration {iteration}:")
             print(f"Upper Bound: {UB:.4f}")
             print(f"Lower Bound: {LB:.4f}")
@@ -108,8 +131,16 @@ def benders_slim(A1, A2, b_scenarios, c1, c2, row_sense, tol=1e-6, max_iters=100
         master.optimize()
 
         if master.status != GRB.OPTIMAL:
-            raise RuntimeError("Master problem not solved to optimality.")
-
+            print("Master problem not solved to optimality.")
+            print("Model Status:", master.status)
+            if int(master.status) == 3:
+                print("Infeasibility detected. Check model constraints.")
+                master.computeIIS()
+                master.write("infeasible.ilp")
+                master.write("benders_slim_model.lp")
+                print("Infesability report written to infeasible.ilp, model written to benders_slim_model.lp")
+            return None
+        
         x_val = np.array([x[i].X for i in range(n1)])
         theta_val = theta.X
 
@@ -130,9 +161,10 @@ def benders_slim(A1, A2, b_scenarios, c1, c2, row_sense, tol=1e-6, max_iters=100
                 cuts_added += 1
 
             elif sub_res["status"] == "infeasible":
-                raise NotImplementedError("Feasibility cuts not yet implemented.")
+                print(f"Subproblem infeasible for scenario with probability {prob}.")
+                return None
             else:
-                raise RuntimeError("Unexpected subproblem status.")
+                print('I don\'t know what the problem is')
 
         UB = master.objVal
         LB = sum(c1[i] * x_val[i] for i in range(n1)) + expected_rec_cost
@@ -141,10 +173,32 @@ def benders_slim(A1, A2, b_scenarios, c1, c2, row_sense, tol=1e-6, max_iters=100
         "x": x_val,
         "theta": theta_val,
         "objective": master.objVal,
-        "iterations": iteration
+        "iterations": iteration,
+        "constraints_added": cuts_added
     }
     
 def benders_fat(A1, A2, b_scenarios, c1, c2, row_sense, row_names, tol=1e-4, max_iters=50):
+    """
+    Solve the Benders decomposition problem using the fat Benders approach.
+    
+    Arguments:
+        A1: Coefficient matrix for first-stage variables (dense)
+        A2: Coefficient matrix for second-stage variables (dense)
+        b_scenarios: List of tuples (probability, b^k) for each scenario
+        c1: Coefficients for first-stage objective function
+        c2: Coefficients for second-stage objective function
+        row_sense: List of constraint senses ('L', 'E', 'G')
+        row_names: List of constraint names
+        tol: Tolerance for convergence
+        max_iters: Maximum number of iterations
+    Returns:
+        Mapping with optimal values of x and y, objective value, number of iterations,
+        and the number of constraints added to the master problem.
+    """
+    
+    # Reset Gurobi model
+    # gp.Model.reset()
+    
     m, n1 = A1.shape
     _, n2 = A2.shape
     K = len(b_scenarios)
@@ -192,12 +246,18 @@ def benders_fat(A1, A2, b_scenarios, c1, c2, row_sense, row_names, tol=1e-4, max
 
     while not converged and iteration < max_iters:
         iteration += 1
-        print(f"\nIteration {iteration}")
+        if iteration % 10 == 0:
+            print(f"Iteration {iteration}:")
+            print(f"Objective: {master.objVal:.4f}")
         master.optimize()
 
         if master.status != GRB.OPTIMAL:
             print("Master problem not solved to optimality.")
             print("Model Status:", master.status)
+            if int(master.status) == 3:
+                print("Infeasibility detected. Check model constraints.")
+                master.computeIIS()
+                master.write("infeasible.ilp")
             break
 
         x_val = np.array([x[i].X for i in range(n1)])
@@ -244,79 +304,6 @@ def benders_fat(A1, A2, b_scenarios, c1, c2, row_sense, row_names, tol=1e-4, max
         "x": np.array([x[i].X for i in range(n1)]),
         "y": {k: np.array([y[k][j].X for j in range(n2)]) for k in range(K)},
         "objective": master.objVal,
-        "iterations": iteration
+        "iterations": iteration,
+        "constraints_added": sum(len(v) for v in scenario_constrs.values())
     }
-
-
-cor_data = parse_cor("airlift/AIRL.cor")
-tim_data = parse_tim("airlift/AIRL.tim")
-sto_first = parse_sto_dep("airlift/AIRL.sto.first", cor_data["row_names"], cor_data["b"])
-sto_second = parse_sto_indep("airlift/AIRL.sto.second", cor_data["row_names"], cor_data["b"])
-
-split = split_stages(
-    A=cor_data["A"],
-    b=cor_data["b"],
-    c=cor_data["c"],
-    var_names=cor_data["var_names"],
-    variable_stage=tim_data
-)
-
-# slim_benders_result_first = benders_slim(
-#     A1=split["A1"],
-#     A2=split["A2"],
-#     b_scenarios=sto_first,  # or sto_second
-#     c1=split["c1"],
-#     c2=split["c2"],
-#     row_sense=cor_data["row_sense"]
-# )
-
-# slim_benders_result_second = benders_slim(
-#     A1=split["A1"],
-#     A2=split["A2"],
-#     b_scenarios=sto_second,
-#     c1=split["c1"],
-#     c2=split["c2"],
-#     row_sense=cor_data["row_sense"]
-# )
-
-
-fat_benders_result_first = benders_fat(
-    A1=split["A1"],
-    A2=split["A2"],
-    b_scenarios=sto_first,
-    c1=split["c1"],
-    c2=split["c2"],
-    row_sense=cor_data["row_sense"],
-    row_names=cor_data["row_names"]
-)
-
-fat_benders_result_second = benders_fat(
-    A1=split["A1"],
-    A2=split["A2"],
-    b_scenarios=sto_second,
-    c1=split["c1"],
-    c2=split["c2"],
-    row_sense=cor_data["row_sense"],
-    row_names=cor_data["row_names"]
-)
-
-
-# print("\n---Slim Benders decomposition results for .sto.first---")
-# print("\nOptimal objective:", slim_benders_result_first["objective"])
-# print("First-stage solution:", slim_benders_result_first["x"])
-# print('Number of iterations:', slim_benders_result_first["iterations"])
-
-# print("\n---Slim Benders decomposition results for .sto.second---")
-# print("\nOptimal objective:", slim_benders_result_second["objective"])
-# print("First-stage solution:", slim_benders_result_second["x"])
-# print('Number of iterations:', slim_benders_result_second["iterations"])
-
-print("\n---Fat Benders decomposition results for .sto.first---")
-print("\nOptimal objective:", fat_benders_result_first["objective"])
-print("First-stage solution:", fat_benders_result_first["x"])
-print('Number of iterations:', fat_benders_result_first["iterations"])
-
-print("\n---Fat Benders decomposition results for .sto.second---")
-print("\nOptimal objective:", fat_benders_result_second["objective"])
-print("First-stage solution:", fat_benders_result_second["x"])
-print('Number of iterations:', fat_benders_result_second["iterations"])
