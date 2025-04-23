@@ -106,7 +106,7 @@ def write_smps(I, J, S, indep=False, folder=".", base_name="airlift_large", seed
     c1 = np.random.uniform(2000, 10000, size=n1)
     switching_costs = [np.random.uniform(2000, 15000) for _ in range(nrec)]
     c_plus = np.random.uniform(300, 600, size=J)
-    c_minus = np.random.uniform(0, 10, size=J)
+    c_minus = np.zeros(J)
     c2 = np.concatenate([switching_costs, c_plus, c_minus])
     
     # --- Structured matrix and RHS construction ---
@@ -188,7 +188,7 @@ def write_smps(I, J, S, indep=False, folder=".", base_name="airlift_large", seed
     rhs_vec = np.concatenate([
         flight_hours,
         np.zeros(I * J),  # AVAIL rows
-        np.mean([[s[f"DEMAND{j+1}"] for j in range(J)] for s in b_scenarios], axis=0)
+        np.ones(J) # DEMAND rows
     ])
 
     # Structured row names and senses
