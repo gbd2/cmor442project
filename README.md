@@ -58,13 +58,27 @@ Use `write_smps(...)` to generate synthetic SMPS instances:
 ---
 
 ## Repository Structure
-.
-├── benders.py         # Fat + Slim Benders implementations
-├── solver.py              # Full model solver
-├── solve_generated_instances.py    # Script that runs, solves, and writes results to generated instances
-├── solve_provided_instances.py    # Script that runs, solves, and writes results to provided instances
-├── generator.py          # SMPS generator + log-normal scenario sampling
-├── reader.py          # SMPS reader + matrix/vector builder for models
-├── airlift/                  # Provided files
-└── README.md              # Project overview and documentation
 
+```
+.
+├── benders.py                # Fat + Slim Benders implementations
+├── solver.py                 # Full extensive form solver
+├── solve_generated_instances.py  # Script to run & log generated instances
+├── solve_provided_instances.py   # Script to run & log provided instances
+├── generator.py              # SMPS generator + log-normal sampling
+├── reader.py                 # SMPS file parser + matrix builder
+├── airlift/                  # Provided instance files (.cor, .tim, .sto)
+├── requirements.txt          # Dependency text
+└── README.md                 # Project overview and documentation
+```
+
+## Dependencies
+
+run pip install -r requirements.txt
+
+## Authors
+
+- Gavin Daves, Rice University
+- Beck Edwards, Rice University
+- Matthew Cihlar, Rice University
+- A Little Help From Our Friend/TA ChatGPT 🤖
