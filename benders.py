@@ -84,7 +84,6 @@ def benders_slim(A1, A2, b_scenarios, c1, c2, row_sense, row_names=None, tol=1e-
     A1_master = A1[first_rows, :]
     T2_sub   = A1[second_rows, :]
     A2_sub   = A2[second_rows, :]
-    c2_sub   = c2
 
     sense1 = [row_sense[i] for i in first_rows]
     sense2 = [row_sense[i] for i in second_rows]
@@ -198,9 +197,6 @@ def benders_fat(A1, A2, b_scenarios, c1, c2, row_sense, row_names, tol=1e-4, max
         and the number of constraints added to the master problem.
     """
     
-    # Reset Gurobi model
-    # gp.Model.reset()
-    
     m, n1 = A1.shape
     _, n2 = A2.shape
     K = len(b_scenarios)
@@ -215,13 +211,13 @@ def benders_fat(A1, A2, b_scenarios, c1, c2, row_sense, row_names, tol=1e-4, max
         for k in range(K)
     }
 
-    # === OBJECTIVE ===
+    # OBJECTIVE
     obj = gp.quicksum(c1[i] * x[i] for i in range(n1))
     for k, (prob, _) in enumerate(b_scenarios):
         obj += prob * gp.quicksum(c2[j] * y[k][j] for j in range(n2))
     master.setObjective(obj, GRB.MINIMIZE)
 
-    # === FIRST-STAGE CONSTRAINTS ===
+    # FIRST-STAGE CONSTRAINTS
     # Identify first-stage constraints (those that do NOT depend on demand)
     first_stage_idx = [i for i, r in enumerate(row_sense) if "HOURS" in row_names[i]]
 
@@ -241,7 +237,7 @@ def benders_fat(A1, A2, b_scenarios, c1, c2, row_sense, row_names, tol=1e-4, max
         dummy_constr = gp.quicksum(y[k][j] for j in range(n2)) <= 1e6
         master.addConstr(dummy_constr, name=f"dummy_bound_{k}")
 
-    # === FAT BENDERS LOOP ===
+    # FAT BENDERS LOOP
     scenario_constrs = {k: set() for k in range(K)}
     converged = False
     iteration = 0

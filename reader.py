@@ -3,6 +3,23 @@ import numpy as np
 from itertools import product
 
 def parse_cor(cor_file_path):
+    """
+    Parse a .cor file and extract the coefficient matrix, right-hand side vector,
+    objective coefficients, and variable names.
+    
+    Parameters:
+        cor_file_path: Path to the .cor file
+        
+    Returns:
+        A: Coefficient matrix
+        b: Right-hand side vector
+        c: Objective coefficients vector
+        row_names: List of row names (constraints)
+        var_names: List of variable names
+        row_to_idx: Dictionary mapping row names to indices
+        var_to_idx: Dictionary mapping variable names to indices
+        row_sense: List of constraint senses (L, E, G)
+    """
     with open(cor_file_path, 'r') as f:
         lines = f.readlines()
 
@@ -99,6 +116,16 @@ def parse_cor(cor_file_path):
     }
     
 def parse_tim(tim_file_path):
+    """
+    Parse a .tim file and extract the variable stages.
+    
+    Parameters:
+        tim_file_path: Path to the .tim file
+        
+    Returns:
+        variable_stage: Dictionary mapping variable names to their stage (1 or 2)
+    """
+    
     with open(tim_file_path, 'r') as f:
         lines = f.readlines()
 
@@ -139,6 +166,7 @@ def split_stages(A, b, c, var_names, variable_stage):
         c: Objective coefficients vector
         var_names: List of variable names
         variable_stage: Dictionary mapping variable names to their stage (1 or 2)
+        
     Returns:
         A1, A2: Coefficient matrices for first and second stages
         c1, c2: Objective coefficients for first and second stages
@@ -171,10 +199,20 @@ def split_stages(A, b, c, var_names, variable_stage):
     }
 
 def parse_sto_dep(sto_file_path, row_names, default_rhs):
+    """
+    Parse a .sto file for dependent scenarios.
+    
+    Parameters:
+        sto_file_path: Path to the .sto file
+        row_names: List of row names (constraints)
+        default_rhs: Default right-hand side vector
+    
+    Returns:
+        scenarios: List of tuples (probability, rhs vector) for each scenario
+    """
     scenarios = []
     current_rhs = default_rhs.copy()
     prob = None
-    in_block = False
 
     with open(sto_file_path, 'r') as f:
         for line in f:
@@ -214,6 +252,17 @@ def parse_sto_dep(sto_file_path, row_names, default_rhs):
     return scenarios  # list of tuples: (probability, rhs vector)
 
 def parse_sto_indep(sto_file_path, row_names, default_rhs):
+    """
+    Parse a .sto file for independent scenarios.
+    
+    Parameters:
+        sto_file_path: Path to the .sto file
+        row_names: List of row names (constraints)
+        default_rhs: Default right-hand side vector
+    
+    Returns:
+        scenarios: List of tuples (probability, rhs vector) for each scenario
+    """
     rhs_values = defaultdict(list)  # row → list of (value, prob)
 
     with open(sto_file_path, 'r') as f:
@@ -249,3 +298,72 @@ def parse_sto_indep(sto_file_path, row_names, default_rhs):
         scenarios.append((total_prob, b_s.copy()))
 
     return scenarios
+
+def build_extensive_form(A1, A2, b, c1, c2, sto_scenarios, row_sense):
+    """
+    Build the extensive form of the problem based on the first and second stage matrices.
+    
+    Parameters:
+        A1: Coefficient matrix for the first stage
+        A2: Coefficient matrix for the second stage
+        b: Right-hand side vector (same for all scenarios)
+        c1: Objective coefficients for the first stage
+        c2: Objective coefficients for the second stage
+        sto_scenarios: List of tuples (probability, rhs vector) for each scenario
+        row_sense: List of constraint senses (L, E, G) for each row in A1 and A2
+        
+    Returns:
+        A_ext: Extended coefficient matrix for the extensive form
+        b_ext: Extended right-hand side vector for the extensive form
+        c_ext: Extended objective coefficients vector for the extensive form
+        row_sense_ext: List of constraint senses for the extended problem
+        n1: Number of variables in the first stage
+        n2: Number of variables in the second stage
+        K: Number of scenarios
+    """
+    
+    m, n1 = A1.shape
+    _, n2 = A2.shape
+    K = len(sto_scenarios)
+
+    total_vars = n1 + K * n2
+    total_rows = K * m
+
+    # Big A matrix: each block is [A1 | 0 ... A2 ... 0]
+    A_ext = np.zeros((total_rows, total_vars))
+    b_ext = np.zeros(total_rows)
+    c_ext = np.zeros(total_vars)
+    row_sense_ext = []
+
+    # First-stage cost
+    c_ext[:n1] = c1
+
+    for k, (prob, b_k) in enumerate(sto_scenarios):
+        row_start = k * m
+        row_end = (k + 1) * m
+
+        # Place A1 block
+        A_ext[row_start:row_end, :n1] = A1
+        # Place A2 block in scenario's y^k slot
+        col_start = n1 + k * n2
+        col_end = col_start + n2
+        A_ext[row_start:row_end, col_start:col_end] = A2
+
+        # RHS
+        b_ext[row_start:row_end] = b_k
+
+        # Scenario-weighted second-stage cost
+        c_ext[col_start:col_end] = prob * c2
+
+        # Extend row senses
+        row_sense_ext.extend(row_sense)
+
+    return {
+        'A_ext': A_ext,
+        'b_ext': b_ext,
+        'c_ext': c_ext,
+        'row_sense': row_sense_ext,
+        'n1': n1,
+        'n2': n2,
+        'K': K
+    }

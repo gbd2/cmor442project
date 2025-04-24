@@ -28,23 +28,7 @@ small_split = split_stages(
     var_names=small_cor_data["var_names"],
     variable_stage=small_tim_data
 )
-
-# Write a1, a2, b_scenarios, c1, c2 to files
-# with open("ex.data", "w") as f:
-#     f.write("A1\n")
-#     for row in small_split["A1"]:
-#         f.write(" ".join(map(str, row)) + "\n")
-#     f.write("\nA2\n")
-#     for row in small_split["A2"]:
-#         f.write(" ".join(map(str, row)) + "\n")
-#     f.write("\nb_scenarios\n")
-#     for prob, b in small_sto_first:
-#         f.write(f"{prob} " + " ".join(map(str, b)) + "\n")
-#     f.write("\nc1\n")
-#     f.write(" ".join(map(str, small_split["c1"])) + "\n")
-#     f.write("\nc2\n")
-#     f.write(" ".join(map(str, small_split["c2"])) + "\n")
-        
+       
 medium_cor_data = parse_cor('test/' + MEDIUM_NAME + ".cor")
 medium_tim_data = parse_tim('test/' + MEDIUM_NAME + ".tim")
 medium_sto_first = parse_sto_dep('test/' + MEDIUM_NAME + ".sto.first", medium_cor_data["row_names"], medium_cor_data["b"])
@@ -215,4 +199,3 @@ with open("generated_instance_results.txt", "w") as f:
     f.write(f"Number of iterations (fat): {fat_benders_result_large['iterations']}\n")
     f.write(f"Time taken (fat): {time_fat_large} seconds\n\n")
     f.write(f"Cuts added (fat): {fat_benders_result_large['cuts_added']}\n\n")
-    

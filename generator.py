@@ -168,7 +168,6 @@ def write_smps(I, J, S, indep=False, folder=".", base_name="airlift_large", seed
             row += 1
         
     # --- Demand Constraints (J) ---
-    # Continuing col from above (should now be nrec)
     # Add negative b_ij * aijk/aij for flights switched away
     # Add positive b_ij for flights switched to
     # Add y+ as +1, y- as -1
