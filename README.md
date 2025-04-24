@@ -1,4 +1,4 @@
-# ✈️  Airlift Scheduling Problem Using 2-Stage Linear Programming Methods ✈️ 
+# Airlift Scheduling Problem Using 2-Stage Linear Programming Methods ✈️ 
 
 This project implements and compares **Fat** and **Slim** Benders Decomposition approaches for a two-stage stochastic airlift scheduling problem. It includes full support for **SMPS file generation**, scenario sampling via **log-normal distributions**, and scalable experimentation on small and large instances.
 
@@ -34,11 +34,10 @@ Decomposes the problem into a master and scenario-wise subproblems.
 
 ---
 
-## 🧪 Experiments
+## Experiments
 
 We include tests on both:
 - `.sto.first`: Jointly sampled log-normal demand (fully correlated)
-- `.sto.second`: Independently sampled log-normal demand
 
 Performance is reported across:
 - Runtime
@@ -46,7 +45,9 @@ Performance is reported across:
 - Objective optimality
 - Cuts added
 
-## ⚙Generators
+We did not run tests using `.sto.second` due to the memory deficiency on Gavin's brick of a computer.
+
+## Generators
 
 Use `write_smps(...)` to generate synthetic SMPS instances:
 
@@ -56,5 +57,14 @@ Use `write_smps(...)` to generate synthetic SMPS instances:
 
 ---
 
-## 📁 Repository Structure
+## Repository Structure
+.
+├── benders.py         # Fat + Slim Benders implementations
+├── solver.py              # Full model solver
+├── solve_generated_instances.py    # Script that runs, solves, and writes results to generated instances
+├── solve_provided_instances.py    # Script that runs, solves, and writes results to provided instances
+├── generator.py          # SMPS generator + log-normal scenario sampling
+├── reader.py          # SMPS reader + matrix/vector builder for models
+├── airlift/                  # Provided files
+└── README.md              # Project overview and documentation
 
