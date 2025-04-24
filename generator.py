@@ -87,6 +87,20 @@ def generate_indep_log_normal_samples(mu_vec, sigma_vec, N_vec):
     return scenarios
 
 def write_smps(I, J, S, indep=False, folder=".", base_name="airlift_large", seed=42):
+    """
+    Generates a SMPS file for the airlift problem with specified parameters.
+    
+    Parameters:
+        I (int): Number of aircraft.
+        J (int): Number of routes.
+        S (int): Number of scenarios.
+        indep (bool): If True, generate independent log-normal samples.
+        folder (str): Directory to save the generated files.
+        base_name (str): Base name for the generated files.
+        seed (int): Random seed for reproducibility.
+    Returns:
+        None, but writes .cor, .tim, and .sto files to the specified folder.
+    """
     np.random.seed(seed)
     n1 = I * J
     nrec = I * J * (J - 1)

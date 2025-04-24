@@ -2,26 +2,30 @@ import numpy as np
 import gurobipy as gp
 from gurobipy import GRB
 
-def solve_subproblem(x_val, A1, A2, b_s, c2, row_sense):
-    m, n2 = A2.shape
+def solve_subproblem(x_val, T2, A2, b2, c2, sense2):
+    """
+    Solve the second-stage subproblem:
+        minimize c2^T y
+        s.t. A2 y {<=,=,>=} b2 - T2 x_val
+    """
+    m2, n2 = A2.shape
     y_model = gp.Model("BendersSubproblem")
     y_model.setParam("OutputFlag", 0)
 
     # Variables
     y = y_model.addVars(n2, lb=0.0, vtype=GRB.CONTINUOUS, name="y")
 
-    # RHS: b_s - A1 x
-    rhs_resid = b_s - A1 @ x_val
+    # Residual RHS: b2 - T2 @ x_val
+    rhs_resid = b2 - T2.dot(x_val)
 
-    # Constraints: A2 y <= rhs_resid
-
+    # Recourse constraints
     constraints = []
-    for i in range(m):
+    for i in range(m2):
         expr = gp.LinExpr()
         for j in range(n2):
             if A2[i, j] != 0:
-                expr.add(A2[i, j] * y[j])
-        sense = row_sense[i]
+                expr.add(A2[i, j]*y[j])
+        sense = sense2[i]
         if sense == "L":
             constraints.append(y_model.addConstr(expr <= rhs_resid[i]))
         elif sense == "E":
@@ -29,60 +33,67 @@ def solve_subproblem(x_val, A1, A2, b_s, c2, row_sense):
         elif sense == "G":
             constraints.append(y_model.addConstr(expr >= rhs_resid[i]))
         else:
-            raise ValueError(f"Unknown constraint sense: {sense}")
+            raise ValueError(f"Unknown sense: {sense}")
 
-    # Objective
-    obj = gp.LinExpr()
-    for j in range(n2):
-        if c2[j] != 0:
-            obj.add(c2[j] * y[j])
+    # Objective: minimize c2^T y
+    obj = gp.quicksum(c2[j] * y[j] for j in range(n2) if c2[j] != 0)
     y_model.setObjective(obj, GRB.MINIMIZE)
-
-    # Solve
     y_model.optimize()
 
-    # Results
     if y_model.status == GRB.OPTIMAL:
-        obj_val = y_model.ObjVal
-        duals = [constr.Pi for constr in constraints]
         return {
             'status': 'optimal',
-            'value': obj_val,
-            'duals': np.array(duals)
+            'value': y_model.ObjVal,
+            'duals': np.array([con.Pi for con in constraints])
         }
     elif y_model.status == GRB.INFEASIBLE:
-        return {
-            'status': 'infeasible'
-        }
+        return {'status': 'infeasible'}
     else:
-        raise RuntimeError(f"Unexpected subproblem status: {y_model.status}")
+        raise RuntimeError(f"Subproblem status: {y_model.status}")
 
-def benders_slim(A1, A2, b_scenarios, c1, c2, row_sense, tol=1e-6, max_iters=50):
+def benders_slim(A1, A2, b_scenarios, c1, c2, row_sense, row_names=None, tol=1e-6, max_iters=50):
     """
     Solve the Benders decomposition problem using the slim Benders approach.
     
     Arguments: 
         A1: Coefficient matrix for first-stage variables (dense)
-        A2: Coefficient matrix for second-stage variables (dense)
-        b_scenarios: List of tuples (probability, b^k) for each scenario
+        A2: Coefficient matrix for second-stage variables (dense),
+        b_scenarios: List of tuples (probability, b^k) for each scenario. b1 is the first m rows of b^k.
         c1: Coefficients for first-stage objective function
         c2: Coefficients for second-stage objective function
         row_sense: List of constraint senses ('L', 'E', 'G')
+        row_names: List of constraint names
         tol: Tolerance for convergence
         max_iters: Maximum number of iterations
     Returns:
         Mapping with optimal values of x and theta, objective value, number of iterations,
-        and the number of cpnstraints added to the master problem.
+        and the number of constraints added to the master problem.
     """
-    
-    # Reset Gurobi model
-    # gp.Model.reset()
-    
+
+    # Dimensions
     m, n1 = A1.shape
     _, n2 = A2.shape
-    K = len(b_scenarios)
 
-    print(f"Building Benders decomposition model with {m} constraints and {n1} first-stage variables.")
+    # identify first-stage rows
+    first_rows = [i for i,name in enumerate(row_names) if 'HOURS' in name.upper()]
+    second_rows = [i for i in range(m) if i not in first_rows]
+
+    m1, m2 = len(first_rows), len(second_rows)
+
+    # slice matrices
+    A1_master = A1[first_rows, :]
+    T2_sub   = A1[second_rows, :]
+    A2_sub   = A2[second_rows, :]
+    c2_sub   = c2
+
+    sense1 = [row_sense[i] for i in first_rows]
+    sense2 = [row_sense[i] for i in second_rows]
+
+    # first-stage RHS (b1)
+    prob0, full_b0 = b_scenarios[0]
+    b1 = np.array([full_b0[i] for i in first_rows])
+    
+    print(f"Building Benders decomposition model with {m1} first-stage and {m2} second-stage constraints, {n1} first-stage variables and {n2} second-stage variables.")
     
     # Step 1: Initialize master model
     master = gp.Model("SlimBendersMaster")
@@ -90,40 +101,33 @@ def benders_slim(A1, A2, b_scenarios, c1, c2, row_sense, tol=1e-6, max_iters=50)
 
     # Variables: x (first-stage), theta (estimate of recourse cost)
     x = master.addVars(n1, lb=0.0, vtype=GRB.CONTINUOUS, name="x")
-    theta = master.addVar(lb=0.0, vtype=GRB.CONTINUOUS, name="theta")
+    theta = master.addVar(lb=0,vtype=GRB.CONTINUOUS, name="theta")
 
     # Objective: c1^T x + theta
-    master.setObjective(
-        gp.quicksum(c1[i] * x[i] for i in range(n1)) + theta, GRB.MINIMIZE)
+    master.setObjective(gp.quicksum(c1[i] * x[i] for i in range(n1)) + theta, GRB.MINIMIZE)
 
-    # Add first-stage constraints
-    for i in range(m):
-        if row_sense[i] == "L":
-            master.addConstr(
-                gp.quicksum(A1[i, j] * x[j] for j in range(n1)) <= b_scenarios[0][1][i],
-                name=f"master_constr_L_{i}"
-            )
-        elif row_sense[i] == "E":
-            master.addConstr(
-                gp.quicksum(A1[i, j] * x[j] for j in range(n1)) == b_scenarios[0][1][i],
-                name=f"master_constr_E_{i}"
-            )
-        elif row_sense[i] == "G":
-            master.addConstr(
-                gp.quicksum(A1[i, j] * x[j] for j in range(n1)) >= b_scenarios[0][1][i],
-                name=f"master_constr_G_{i}"
-            )
+    # First-stage constraints: A1 x <= b1
+    for idx, i in enumerate(first_rows):
+        expr = gp.quicksum(A1_master[idx,j] * x[j] for j in range(n1))
+        s = sense1[idx]
+        if s=='L': 
+            master.addConstr(expr <= b1[idx])
+        elif s=='E': 
+            master.addConstr(expr == b1[idx])
+        elif s=='G': 
+            master.addConstr(expr >= b1[idx])
         else:
             raise ValueError(f"Invalid row sense {row_sense[i]}")
-
+    
     iteration = 0
+    cuts_added = 0
     UB = 1e10     # large but finite
     LB = -1e10    # small but finite
     
     print("Starting Benders decomposition loop")
     while iteration < max_iters and abs((UB - LB) / (abs(UB) + 1e6)) > tol:
         iteration += 1
-        if iteration % 10 == 0:
+        if iteration % 25 == 0:
             print(f"Iteration {iteration}:")
             print(f"Upper Bound: {UB:.4f}")
             print(f"Lower Bound: {LB:.4f}")
@@ -143,31 +147,29 @@ def benders_slim(A1, A2, b_scenarios, c1, c2, row_sense, tol=1e-6, max_iters=50)
         
         x_val = np.array([x[i].X for i in range(n1)])
         theta_val = theta.X
-
         expected_rec_cost = 0.0
-        cuts_added = 0
+        pi_bar = np.zeros(m2)
+        rhs_bar = 0
 
-        for prob, b_s in b_scenarios:
-            sub_res = solve_subproblem(x_val, A1, A2, b_s, c2, row_sense)
-
+        for prob, full_b in b_scenarios:
+            b2 = np.array([full_b[i] for i in second_rows])
+            sub_res = solve_subproblem(x_val, T2_sub, A2_sub, b2, c2, sense2)
             if sub_res["status"] == "optimal":
                 expected_rec_cost += prob * sub_res["value"]
-                pi = sub_res["duals"]
-
-                # Optimality cut: θ ≥ πᵀ(b_s - A1 x)
-                rhs = np.dot(pi, b_s)
-                lhs_expr = gp.quicksum(-pi[i] * gp.quicksum(A1[i, j] * x[j] for j in range(n1)) for i in range(m))
-                master.addConstr(theta >= rhs + lhs_expr)
-                cuts_added += 1
-
+                pi_bar += sub_res["duals"] * prob  # dual variables for the subproblem constraints
+                # compute the constant term    
+                rhs_bar += prob * (sub_res["duals"] @ b2)
             elif sub_res["status"] == "infeasible":
                 print(f"Subproblem infeasible for scenario with probability {prob}.")
                 return None
             else:
                 print('I don\'t know what the problem is')
+        lhs_bar = gp.quicksum(-pi_bar[i] * gp.quicksum(T2_sub[i,j] * x[j] for j in range(n1)) for i in range(m2))
+        master.addConstr(theta >= rhs_bar + lhs_bar, name=f"benders_cut_{iteration}")
+        cuts_added += 1
 
-        UB = master.objVal
-        LB = sum(c1[i] * x_val[i] for i in range(n1)) + expected_rec_cost
+        LB = master.objVal
+        UB = sum(c1[i] * x_val[i] for i in range(n1)) + expected_rec_cost
 
     return {
         "x": x_val,

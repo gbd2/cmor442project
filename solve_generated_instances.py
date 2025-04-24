@@ -77,7 +77,8 @@ slim_benders_result_small = benders_slim(
     b_scenarios=small_sto_first,
     c1=small_split["c1"],
     c2=small_split["c2"],
-    row_sense=small_cor_data["row_sense"]
+    row_sense=small_cor_data["row_sense"],
+    row_names=small_cor_data["row_names"]
 )
 time_slim_small = time.time() - time_slim_small
 time_fat_small = time.time()
@@ -111,7 +112,8 @@ slim_benders_result_medium = benders_slim(
     b_scenarios=medium_sto_first,
     c1=medium_split["c1"],
     c2=medium_split["c2"],
-    row_sense=medium_cor_data["row_sense"]
+    row_sense=medium_cor_data["row_sense"],
+    row_names=medium_cor_data["row_names"],
 )
 time_slim_medium = time.time() - time_slim_medium
 time_fat_medium = time.time()
@@ -122,7 +124,7 @@ fat_benders_result_medium = benders_fat(
     c1=medium_split["c1"],
     c2=medium_split["c2"],
     row_sense=medium_cor_data["row_sense"],
-    row_names=medium_cor_data["row_names"]
+    row_names=medium_cor_data["row_names"],
 )
 time_fat_medium = time.time() - time_fat_medium
 
@@ -146,7 +148,8 @@ slim_benders_result_large = benders_slim(
     b_scenarios=large_sto_first,
     c1=large_split["c1"],
     c2=large_split["c2"],
-    row_sense=large_cor_data["row_sense"]
+    row_sense=large_cor_data["row_sense"],
+    row_names=large_cor_data["row_names"],
 )
 time_slim_large = time.time() - time_slim_large
 time_fat_large = time.time()
@@ -182,15 +185,34 @@ with open("generated_instance_results.txt", "w") as f:
     f.write(f"First-stage solution (slim): {slim_benders_result_small['x']}\n")
     f.write(f"Number of iterations (slim): {slim_benders_result_small['iterations']}\n")
     f.write(f"Time taken (slim): {time_slim_small} seconds\n\n")
+    f.write(f"Cuts added (slim): {slim_benders_result_small['cuts_added']}\n")
+    f.write(f"Optimal objective (fat): {fat_benders_result_small['objective']}\n")
+    f.write(f"First-stage solution (fat): {fat_benders_result_small['x']}\n")
+    f.write(f"Number of iterations (fat): {fat_benders_result_small['iterations']}\n")
+    f.write(f"Time taken (fat): {time_fat_small} seconds\n\n")
+    f.write(f"Cuts added (fat): {fat_benders_result_small['cuts_added']}\n\n")
 
     f.write("Medium test instance results:\n")
     f.write(f"Optimal objective (slim): {slim_benders_result_medium['objective']}\n")
     f.write(f"First-stage solution (slim): {slim_benders_result_medium['x']}\n")
     f.write(f"Number of iterations (slim): {slim_benders_result_medium['iterations']}\n")
     f.write(f"Time taken (slim): {time_slim_medium} seconds\n\n")
-
+    f.write(f"Cuts added (slim): {slim_benders_result_medium['cuts_added']}\n")
+    f.write(f"Optimal objective (fat): {fat_benders_result_medium['objective']}\n")
+    f.write(f"First-stage solution (fat): {fat_benders_result_medium['x']}\n")
+    f.write(f"Number of iterations (fat): {fat_benders_result_medium['iterations']}\n")
+    f.write(f"Time taken (fat): {time_fat_medium} seconds\n\n")
+    f.write(f"Cuts added (fat): {fat_benders_result_medium['cuts_added']}\n\n")
+    
     f.write("Large test instance results:\n")
     f.write(f"Optimal objective (slim): {slim_benders_result_large['objective']}\n")
     f.write(f"First-stage solution (slim): {slim_benders_result_large['x']}\n")
     f.write(f"Number of iterations (slim): {slim_benders_result_large['iterations']}\n")
     f.write(f"Time taken (slim): {time_slim_large} seconds\n\n")
+    f.write(f"Cuts added (slim): {slim_benders_result_large['cuts_added']}\n")
+    f.write(f"Optimal objective (fat): {fat_benders_result_large['objective']}\n")
+    f.write(f"First-stage solution (fat): {fat_benders_result_large['x']}\n")
+    f.write(f"Number of iterations (fat): {fat_benders_result_large['iterations']}\n")
+    f.write(f"Time taken (fat): {time_fat_large} seconds\n\n")
+    f.write(f"Cuts added (fat): {fat_benders_result_large['cuts_added']}\n\n")
+    
