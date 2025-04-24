@@ -1,7 +1,5 @@
 import numpy as np
-import pandas as pd
 from itertools import product
-import scipy.sparse as sp
 import os
 
 def lognormal_params(mean, std):

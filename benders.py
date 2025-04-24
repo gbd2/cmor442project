@@ -2,7 +2,7 @@ import numpy as np
 import gurobipy as gp
 from gurobipy import GRB
 
-def solve_subproblem(x_val, T2, A2, b2, c2, sense2):
+def solve_subproblem_slim(x_val, T2, A2, b2, c2, sense2):
     """
     Solve the second-stage subproblem:
         minimize c2^T y
@@ -50,6 +50,42 @@ def solve_subproblem(x_val, T2, A2, b2, c2, sense2):
         return {'status': 'infeasible'}
     else:
         raise RuntimeError(f"Subproblem status: {y_model.status}")
+
+def solve_subproblem_fat(x_val, A1, A2, b_s, c2, row_sense, lb2, ub2):
+    """
+    Solve the second stage subproblem:
+        min  c2^T y
+        s.t. A1 x + A2 y {<=,=,>=}  b_s
+    """
+    m, n2 = A2.shape
+    mdl = gp.Model("BendersSub")
+    mdl.Params.OutputFlag = 0
+    mdl.Params.Threads     = 1
+
+    if lb2 is None: lb2 = np.zeros(n2)
+    if ub2 is None: ub2 = np.full (n2,  GRB.INFINITY)
+    y = mdl.addVars(n2, lb=lb2, ub=ub2, name="y")
+    
+    resid = b_s - A1 @ x_val
+    cons  = []
+    for i in range(m):
+        expr = gp.quicksum(A2[i, j] * y[j] for j in range(n2))
+        s    = row_sense[i]
+        if   s == "L": cons.append(mdl.addConstr(expr <= resid[i]))
+        elif s == "E": cons.append(mdl.addConstr(expr == resid[i]))
+        elif s == "G": cons.append(mdl.addConstr(expr >= resid[i]))
+        else: raise ValueError(f"unknown sense {s}")
+
+    mdl.setObjective(gp.quicksum(c2[j] * y[j] for j in range(n2)), GRB.MINIMIZE)
+    mdl.optimize()
+
+    if mdl.Status == GRB.OPTIMAL:
+        return {"status": "optimal",
+                "value" : mdl.ObjVal,
+                "duals" : np.array([c.Pi for c in cons])}
+    elif mdl.Status == GRB.INFEASIBLE:
+        return {"status": "infeasible"}
+    raise RuntimeError(f"sub-problem status = {mdl.Status}")
 
 def benders_slim(A1, A2, b_scenarios, c1, c2, row_sense, row_names=None, tol=1e-6, max_iters=50):
     """
@@ -152,7 +188,7 @@ def benders_slim(A1, A2, b_scenarios, c1, c2, row_sense, row_names=None, tol=1e-
 
         for prob, full_b in b_scenarios:
             b2 = np.array([full_b[i] for i in second_rows])
-            sub_res = solve_subproblem(x_val, T2_sub, A2_sub, b2, c2, sense2)
+            sub_res = solve_subproblem_slim(x_val, T2_sub, A2_sub, b2, c2, sense2)
             if sub_res["status"] == "optimal":
                 expected_rec_cost += prob * sub_res["value"]
                 pi_bar += sub_res["duals"] * prob  # dual variables for the subproblem constraints
@@ -175,7 +211,7 @@ def benders_slim(A1, A2, b_scenarios, c1, c2, row_sense, row_names=None, tol=1e-
         "theta": theta_val,
         "objective": master.objVal,
         "iterations": iteration,
-        "constraints_added": cuts_added
+        "cuts_added": cuts_added
     }
     
 def benders_fat(A1, A2, b_scenarios, c1, c2, row_sense, row_names, tol=1e-4, max_iters=50):
@@ -198,110 +234,65 @@ def benders_fat(A1, A2, b_scenarios, c1, c2, row_sense, row_names, tol=1e-4, max
     """
     
     m, n1 = A1.shape
-    _, n2 = A2.shape
     K = len(b_scenarios)
 
-    master = gp.Model("FatBenders")
+    master = gp.Model("FatMaster")
     master.setParam("OutputFlag", 0)
 
-    # === VARIABLES ===
-    x = master.addVars(n1, lb=0.0, vtype=GRB.CONTINUOUS, name="x")
-    y = {
-        k: master.addVars(n2, lb=0.0, vtype=GRB.CONTINUOUS, name=f"y_{k}")
-        for k in range(K)
-    }
+    # Variables
+    x = master.addVars(n1, lb=0.0, name="x")
+    theta = {k: master.addVar(lb=0.0, name=f"theta_{k}") for k in range(K)}
 
-    # OBJECTIVE
-    obj = gp.quicksum(c1[i] * x[i] for i in range(n1))
-    for k, (prob, _) in enumerate(b_scenarios):
-        obj += prob * gp.quicksum(c2[j] * y[k][j] for j in range(n2))
-    master.setObjective(obj, GRB.MINIMIZE)
+    # Objective: c1^T x + sum_k p_k * theta_k
+    master.setObjective(
+        gp.quicksum(c1[j]*x[j] for j in range(n1)) +
+        gp.quicksum(b_scenarios[k][0] * theta[k] for k in range(K)),
+        GRB.MINIMIZE
+    )
 
-    # FIRST-STAGE CONSTRAINTS
-    # Identify first-stage constraints (those that do NOT depend on demand)
-    first_stage_idx = [i for i, r in enumerate(row_sense) if "HOURS" in row_names[i]]
+    # First-stage constraints (from scenario theta)
+    for i in range(m):
+        rhs0 = b_scenarios[0][1][i]
+        s = row_sense[i]
+        lhs = gp.quicksum(A1[i, j]*x[j] for j in range(n1))
+        if s == "L": 
+            master.addConstr(lhs <= rhs0)
+        elif s == "E": 
+            master.addConstr(lhs == rhs0)
+        elif s == "G": 
+            master.addConstr(lhs >= rhs0)
 
-    for i in first_stage_idx:
-        sense = row_sense[i]
-        lhs = gp.quicksum(A1[i, j] * x[j] for j in range(n1))
-        rhs_val = b_scenarios[0][1][i]
-
-        if sense == "L":
-            master.addConstr(lhs <= rhs_val, name=f"first_L_{i}")
-        elif sense == "E":
-            master.addConstr(lhs == rhs_val, name=f"first_E_{i}")
-        elif sense == "G":
-            master.addConstr(lhs >= rhs_val, name=f"first_G_{i}")
-
-    for k in range(K):
-        dummy_constr = gp.quicksum(y[k][j] for j in range(n2)) <= 1e6
-        master.addConstr(dummy_constr, name=f"dummy_bound_{k}")
-
-    # FAT BENDERS LOOP
-    scenario_constrs = {k: set() for k in range(K)}
-    converged = False
-    iteration = 0
-
-    while not converged and iteration < max_iters:
-        iteration += 1
-        if iteration % 10 == 0:
-            print(f"Iteration {iteration}:")
-            print(f"Objective: {master.objVal:.4f}")
+    # Main Benders loop
+    UB, LB, iters = 1e12, -1e12, 0
+    while iters < max_iters and UB - LB > tol * (1 + abs(UB)):
+        iters += 1
         master.optimize()
-
         if master.status != GRB.OPTIMAL:
-            print("Master problem not solved to optimality.")
-            print("Model Status:", master.status)
-            if int(master.status) == 3:
-                print("Infeasibility detected. Check model constraints.")
-                master.computeIIS()
-                master.write("infeasible.ilp")
-            break
+            raise RuntimeError("Fat master not optimal")
 
-        x_val = np.array([x[i].X for i in range(n1)])
-        converged = True
+        x_val = np.array([x[j].X for j in range(n1)])
+        expected = 0.0
 
-        for k, (prob, b_k) in enumerate(b_scenarios):
-            y_val = np.array([y[k][j].X for j in range(n2)])
-            lhs_val = A1 @ x_val + A2 @ y_val
-            violated = False
+        for k, (p_k, b_k) in enumerate(b_scenarios):
+            res = solve_subproblem_fat(x_val, A1, A2, b_k, c2, row_sense, None, None)
+            if res["status"] == "infeasible":
+                raise RuntimeError("Feasibility cut generation not implemented.")
 
-            for i in range(m):
-                if i in scenario_constrs[k]:
-                    continue  # constraint already added
+            pi = res["duals"]
+            expected += p_k * res["value"]
 
-                lhs = lhs_val[i]
-                rhs = b_k[i]
-                sense = row_sense[i]
+            const_term = float(pi @ b_k)
+            coeffs_j = pi @ A1  # ∇(dual) · A1 — one coefficient per x_j
+            cut_expr = const_term - gp.quicksum(coeffs_j[j] * x[j] for j in range(n1))
+            master.addConstr(theta[k] >= cut_expr, name=f"cut_k{k}_it{iters}")
 
-                if (
-                    (sense == "L" and lhs > rhs + tol)
-                    or (sense == "G" and lhs < rhs - tol)
-                    or (sense == "E" and abs(lhs - rhs) > tol)
-                ):
-                    violated = True
-                    scenario_constrs[k].add(i)
-
-                    # Add this scenario constraint
-                    lhs_expr = (
-                        gp.quicksum(A1[i, j] * x[j] for j in range(n1)) +
-                        gp.quicksum(A2[i, j] * y[k][j] for j in range(n2))
-                    )
-
-                    if sense == "L":
-                        master.addConstr(lhs_expr <= rhs, name=f"fat_scen_{k}_L_{i}")
-                    elif sense == "E":
-                        master.addConstr(lhs_expr == rhs, name=f"fat_scen_{k}_E_{i}")
-                    elif sense == "G":
-                        master.addConstr(lhs_expr >= rhs, name=f"fat_scen_{k}_G_{i}")
-
-            if violated:
-                converged = False
+        UB = master.ObjVal
+        LB = sum(c1[j] * x_val[j] for j in range(n1)) + expected
 
     return {
-        "x": np.array([x[i].X for i in range(n1)]),
-        "y": {k: np.array([y[k][j].X for j in range(n2)]) for k in range(K)},
-        "objective": master.objVal,
-        "iterations": iteration,
-        "constraints_added": sum(len(v) for v in scenario_constrs.values())
+        "x" : np.array([x[j].X for j in range(n1)]),
+        "theta" : {k: theta[k].X for k in range(K)},
+        "objective" : master.ObjVal,
+        "iterations": iters,
+        "cuts_added" : iters * K
     }
